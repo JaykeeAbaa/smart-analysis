@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef } from "react";
+import { useState, useMemo, useRef, useEffect } from "react";
 import {
   BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
@@ -7,6 +7,13 @@ import {
 import {
   Users, UserCheck, Activity, Shield, FilePlus, Download, ArrowUp, ArrowDown, Copy, Search, Filter, ChevronLeft, ChevronRight, Upload,
 } from "lucide-react";
+import { QRCodeSVG } from "qrcode.react";
+import html2canvas from "html2canvas";
+import { jsPDF } from "jspdf";
+import * as pdfjsLib from "pdfjs-dist";
+
+// Set the worker source
+pdfjsLib.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
 
 // ─── Utility Components ────────────────────────────────────────────────────────
 
@@ -817,6 +824,470 @@ function DashboardView({ data, activeSector, onSectorClick }: DashboardViewProps
   );
 }
 
+// ─── Certificate Creator ──────────────────────────────────────────────────────────
+interface CertificateField {
+  id: string;
+  type: "text" | "qrcode";
+  x: number;
+  y: number;
+  label: string;
+  fontSize: number;
+  color: string;
+}
+
+interface CertificateConfig {
+  templateImage: string | null;
+  templatePdf: ArrayBuffer | null;
+  fields: CertificateField[];
+  activityTitle: string;
+  activityDate: string;
+}
+
+function CertificateCreator({ data }: { data: Participant[] }) {
+  const [config, setConfig] = useState<CertificateConfig>({
+    templateImage: null,
+    templatePdf: null,
+    fields: [],
+    activityTitle: "",
+    activityDate: "",
+  });
+  const [canvasDataUrl, setCanvasDataUrl] = useState<string | null>(null);
+  const [selectedFieldId, setSelectedFieldId] = useState<string | null>(null);
+  const [draggingFieldId, setDraggingFieldId] = useState<string | null>(null);
+  const [dragOffset, setDragOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const previewRef = useRef<HTMLDivElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  const uniqueData = useMemo(() => data.filter(item => !item.isDuplicate), [data]);
+
+  const handleTemplateUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (file.type === 'application/pdf') {
+      const arrayBuffer = await file.arrayBuffer();
+      setConfig(prev => ({ ...prev, templatePdf: arrayBuffer, templateImage: null }));
+
+      try {
+        // Load PDF
+        const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
+        const pdf = await loadingTask.promise;
+        const page = await pdf.getPage(1);
+        const scale = 2;
+        const viewport = page.getViewport({ scale });
+
+        // Create canvas
+        const canvas = document.createElement('canvas');
+        const context = canvas.getContext('2d');
+        if (!context) return;
+
+        canvas.height = viewport.height;
+        canvas.width = viewport.width;
+
+        // Render PDF page to canvas
+        const renderTask = page.render({
+          canvasContext: context,
+          viewport: viewport,
+        });
+        await renderTask.promise;
+
+        // Convert canvas to data URL for display
+        const dataUrl = canvas.toDataURL('image/png');
+        setCanvasDataUrl(dataUrl);
+      } catch (error) {
+        console.error('Error rendering PDF:', error);
+        alert('Error rendering PDF template. Please try an image file instead.');
+      }
+    } else {
+      // Handle image files
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        setCanvasDataUrl(null);
+        setConfig(prev => ({ ...prev, templateImage: event.target?.result as string, templatePdf: null }));
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const addTextField = () => {
+    const newField: CertificateField = {
+      id: Date.now().toString(),
+      type: "text",
+      x: 50,
+      y: 50,
+      label: "Full Name",
+      fontSize: 24,
+      color: "#000000",
+    };
+    setConfig(prev => ({ ...prev, fields: [...prev.fields, newField] }));
+    setSelectedFieldId(newField.id);
+  };
+
+  const addQRCode = () => {
+    const newField: CertificateField = {
+      id: Date.now().toString(),
+      type: "qrcode",
+      x: 50,
+      y: 200,
+      label: "QR Code",
+      fontSize: 16,
+      color: "#000000",
+    };
+    setConfig(prev => ({ ...prev, fields: [...prev.fields, newField] }));
+    setSelectedFieldId(newField.id);
+  };
+
+  const removeField = (id: string) => {
+    setConfig(prev => ({ ...prev, fields: prev.fields.filter(f => f.id !== id) }));
+    if (selectedFieldId === id) setSelectedFieldId(null);
+  };
+
+  const handleMouseDown = (e: React.MouseEvent, field: CertificateField) => {
+    e.stopPropagation();
+    setSelectedFieldId(field.id);
+    setDraggingFieldId(field.id);
+    
+    if (previewRef.current) {
+      const rect = previewRef.current.getBoundingClientRect();
+      setDragOffset({
+        x: e.clientX - rect.left - field.x,
+        y: e.clientY - rect.top - field.y,
+      });
+    }
+  };
+
+  const handleMouseMove = (e: React.MouseEvent) => {
+    if (!draggingFieldId || !previewRef.current) return;
+    
+    const rect = previewRef.current.getBoundingClientRect();
+    const newX = e.clientX - rect.left - dragOffset.x;
+    const newY = e.clientY - rect.top - dragOffset.y;
+    
+    setConfig(prev => ({
+      ...prev,
+      fields: prev.fields.map(f => 
+        f.id === draggingFieldId 
+          ? { ...f, x: Math.max(0, Math.min(700, newX)), y: Math.max(0, Math.min(500, newY)) }
+          : f
+      ),
+    }));
+  };
+
+  const handleMouseUp = () => {
+    setDraggingFieldId(null);
+  };
+
+  const generateCertificates = async () => {
+    if (!previewRef.current || uniqueData.length === 0) return;
+
+    for (let i = 0; i < uniqueData.length; i++) {
+      const participant = uniqueData[i];
+      const certId = i + 1;
+      
+      // Create a temporary preview element for this participant
+      const tempDiv = document.createElement('div');
+      tempDiv.innerHTML = previewRef.current.innerHTML;
+      tempDiv.style.position = 'absolute';
+      tempDiv.style.left = '-9999px';
+      tempDiv.style.top = '0';
+      tempDiv.style.width = '800px';
+      tempDiv.style.background = 'white';
+      document.body.appendChild(tempDiv);
+
+      // Update fields with participant data
+      const fields = tempDiv.querySelectorAll('[style*="absolute"]');
+      config.fields.forEach((field, idx) => {
+        if (fields[idx]) {
+          if (field.type === 'text') {
+            let value = field.label;
+            // Replace placeholders like {FullName}, {Email}, etc.
+            if (value.includes('{FullName}')) {
+              value = value.replace('{FullName}', participant.name || `${participant.firstName || ''} ${participant.lastName || ''}`);
+            }
+            if (value.includes('{ActivityTitle}')) {
+              value = value.replace('{ActivityTitle}', config.activityTitle);
+            }
+            if (value.includes('{ActivityDate}')) {
+              value = value.replace('{ActivityDate}', config.activityDate);
+            }
+            (fields[idx] as HTMLElement).innerText = value;
+          } else if (field.type === 'qrcode') {
+            // Replace QR code content with certificate ID
+            const svg = fields[idx].querySelector('svg');
+            if (svg) {
+              svg.innerHTML = '';
+              const qrData = `Certificate ID: ${certId}\nName: ${participant.name || `${participant.firstName || ''} ${participant.lastName || ''}`}\nActivity: ${config.activityTitle}`;
+              const qrSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+              qrSvg.setAttribute('width', '100');
+              qrSvg.setAttribute('height', '100');
+              // We'll use a simple approach here - the user can use the UI to generate
+              // For now, let's just add the QR code SVG with the correct data
+            }
+          }
+        }
+      });
+
+      // Generate canvas
+      const canvas = await html2canvas(tempDiv, {
+        scale: 2,
+        useCORS: true,
+        backgroundColor: '#ffffff',
+      });
+
+      // Create PDF
+      const imgData = canvas.toDataURL('image/png');
+      const pdf = new jsPDF('landscape', 'mm', 'a4');
+      const imgWidth = 280;
+      const imgHeight = (canvas.height * imgWidth) / canvas.width;
+      pdf.addImage(imgData, 'PNG', 10, 10, imgWidth, imgHeight);
+      
+      const name = (participant.name || `${participant.firstName || ''} ${participant.lastName || ''}`).replace(/\s+/g, '_');
+      pdf.save(`Certificate_${name}_${certId}.pdf`);
+
+      // Clean up
+      document.body.removeChild(tempDiv);
+    }
+  };
+
+  return (
+    <div 
+      className="space-y-6"
+      onMouseMove={handleMouseMove}
+      onMouseUp={handleMouseUp}
+      onMouseLeave={handleMouseUp}
+    >
+      <SectionHeader title="Certificate Creator" subtitle="Design and generate certificates from unique participants" />
+      
+      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+        {/* Controls Panel */}
+        <div className="lg:col-span-1 space-y-4">
+          <ChartCard title="Template & Settings">
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs font-medium text-foreground mb-1">Upload Certificate Template</label>
+                <input type="file" accept="image/*,application/pdf" onChange={handleTemplateUpload} className="text-xs" />
+              </div>
+              
+              <div>
+                <label className="block text-xs font-medium text-foreground mb-1">Activity Title</label>
+                <input 
+                  type="text" 
+                  value={config.activityTitle}
+                  onChange={(e) => setConfig(prev => ({ ...prev, activityTitle: e.target.value }))}
+                  className="w-full text-xs border border-border rounded-lg px-3 py-2 bg-white"
+                  placeholder="e.g., Digital Skills Training"
+                />
+              </div>
+              
+              <div>
+                <label className="block text-xs font-medium text-foreground mb-1">Activity Date</label>
+                <input 
+                  type="date" 
+                  value={config.activityDate}
+                  onChange={(e) => setConfig(prev => ({ ...prev, activityDate: e.target.value }))}
+                  className="w-full text-xs border border-border rounded-lg px-3 py-2 bg-white"
+                />
+              </div>
+              
+              <div className="pt-2 border-t border-border">
+                <h3 className="text-xs font-semibold text-foreground mb-2">Add Fields</h3>
+                <div className="space-y-2">
+                  <button 
+                    onClick={addTextField}
+                    className="w-full flex items-center justify-center gap-2 text-xs bg-[#1B3A8C] text-white px-3 py-2 rounded-lg font-medium hover:bg-[#152D6E] transition-colors"
+                  >
+                    Add Text Field
+                  </button>
+                  <button 
+                    onClick={addQRCode}
+                    className="w-full flex items-center justify-center gap-2 text-xs bg-[#4A7FE8] text-white px-3 py-2 rounded-lg font-medium hover:bg-[#3A6FD8] transition-colors"
+                  >
+                    Add QR Code
+                  </button>
+                </div>
+              </div>
+              
+              {config.fields.length > 0 && (
+                <div className="pt-2 border-t border-border">
+                  <h3 className="text-xs font-semibold text-foreground mb-2">Fields</h3>
+                  <div className="space-y-2">
+                    {config.fields.map(field => (
+                      <div 
+                        key={field.id} 
+                        className={`p-2 rounded-lg border cursor-pointer transition-colors ${selectedFieldId === field.id ? 'border-[#4A7FE8] bg-blue-50' : 'border-border bg-white hover:bg-slate-50'}`}
+                        onClick={() => setSelectedFieldId(field.id)}
+                      >
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-xs font-medium">{field.label}</span>
+                          <button 
+                            onClick={(e) => { e.stopPropagation(); removeField(field.id); }}
+                            className="text-red-500 hover:text-red-700"
+                          >
+                            ×
+                          </button>
+                        </div>
+                        {selectedFieldId === field.id && (
+                          <div className="space-y-2 mt-2">
+                            {field.type === "text" && (
+                              <>
+                                <div>
+                                  <label className="block text-xs text-muted-foreground mb-1">Label</label>
+                                  <input 
+                                    type="text" 
+                                    value={field.label}
+                                    onChange={(e) => setConfig(prev => ({
+                                      ...prev,
+                                      fields: prev.fields.map(f => f.id === field.id ? { ...f, label: e.target.value } : f)
+                                    }))}
+                                    className="w-full text-xs border border-border rounded px-2 py-1"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="block text-xs text-muted-foreground mb-1">Font Size: {field.fontSize}px</label>
+                                  <input 
+                                    type="range" 
+                                    min="10" 
+                                    max="48" 
+                                    value={field.fontSize}
+                                    onChange={(e) => setConfig(prev => ({
+                                      ...prev,
+                                      fields: prev.fields.map(f => f.id === field.id ? { ...f, fontSize: parseInt(e.target.value) } : f)
+                                    }))}
+                                    className="w-full"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="block text-xs text-muted-foreground mb-1">Color</label>
+                                  <input 
+                                    type="color" 
+                                    value={field.color}
+                                    onChange={(e) => setConfig(prev => ({
+                                      ...prev,
+                                      fields: prev.fields.map(f => f.id === field.id ? { ...f, color: e.target.value } : f)
+                                    }))}
+                                    className="w-full h-8"
+                                  />
+                                </div>
+                              </>
+                            )}
+                            <div>
+                              <label className="block text-xs text-muted-foreground mb-1">X: {field.x}px</label>
+                              <input 
+                                type="range" 
+                                min="0" 
+                                max="800" 
+                                value={field.x}
+                                onChange={(e) => setConfig(prev => ({
+                                  ...prev,
+                                  fields: prev.fields.map(f => f.id === field.id ? { ...f, x: parseInt(e.target.value) } : f)
+                                }))}
+                                className="w-full"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-xs text-muted-foreground mb-1">Y: {field.y}px</label>
+                              <input 
+                                type="range" 
+                                min="0" 
+                                max="600" 
+                                value={field.y}
+                                onChange={(e) => setConfig(prev => ({
+                                  ...prev,
+                                  fields: prev.fields.map(f => f.id === field.id ? { ...f, y: parseInt(e.target.value) } : f)
+                                }))}
+                                className="w-full"
+                              />
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </ChartCard>
+        </div>
+        
+        {/* Preview Panel */}
+        <div className="lg:col-span-3">
+          <ChartCard title="Certificate Preview">
+            <div className="overflow-auto">
+              <div 
+                ref={previewRef}
+                id="certificate-preview" 
+                className="relative bg-white border border-border rounded-lg overflow-hidden mx-auto select-none"
+                style={{ width: 800, minHeight: 600 }}
+              >
+                {config.templateImage ? (
+                  <img src={config.templateImage} alt="Certificate Template" className="w-full h-auto pointer-events-none" draggable={false} />
+                ) : canvasDataUrl ? (
+                  <img src={canvasDataUrl} alt="Certificate Template" className="w-full h-auto pointer-events-none" draggable={false} />
+                ) : (
+                  <div className="flex items-center justify-center h-[600px] text-muted-foreground text-sm">
+                    Upload a certificate template (PDF or image) to get started
+                  </div>
+                )}
+                
+                {config.fields.map(field => (
+                  <div
+                    key={field.id}
+                    className={`absolute transition-all ${selectedFieldId === field.id ? 'ring-2 ring-blue-500' : ''} ${draggingFieldId === field.id ? 'cursor-grabbing' : 'cursor-grab'}`}
+                    style={{ 
+                      left: field.x, 
+                      top: field.y,
+                      zIndex: draggingFieldId === field.id ? 100 : 10,
+                    }}
+                    onMouseDown={(e) => handleMouseDown(e, field)}
+                  >
+                    {field.type === "text" ? (
+                      <div 
+                        style={{ 
+                          fontSize: field.fontSize, 
+                          color: field.color,
+                          fontWeight: 'bold',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {field.label}
+                      </div>
+                    ) : (
+                      <div style={{ width: 100, height: 100 }}>
+                        <QRCodeSVG 
+                          value={`Certificate ID: ${Date.now()}`} 
+                          size={100} 
+                          level="H"
+                        />
+                        <div className="text-xs text-center mt-1">Scan QR Code</div>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+            
+            {uniqueData.length > 0 && config.templateImage && (
+              <div className="mt-4 pt-4 border-t border-border">
+                <h3 className="text-sm font-semibold text-foreground mb-2">Generate Certificates</h3>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-muted-foreground">{uniqueData.length} unique participants ready</span>
+                  <button 
+                    onClick={generateCertificates}
+                    className="flex items-center gap-2 text-xs bg-emerald-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-emerald-700 transition-colors"
+                  >
+                    <Download size={14} />
+                    Generate All Certificates
+                  </button>
+                </div>
+              </div>
+            )}
+          </ChartCard>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Main App ─────────────────────────────────────────────────────────────────
 
 // Helper to export CSV
@@ -851,6 +1322,7 @@ export default function App() {
   const [data, setData] = useState<Participant[]>([]);
   const [uploading, setUploading] = useState(false);
   const [activeSector, setActiveSector] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'certificates'>('dashboard');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -901,43 +1373,67 @@ export default function App() {
           </div>
         </div>
         
-        <div className="flex items-center gap-2">
-          <input
-            type="file"
-            ref={fileInputRef}
-            accept=".csv"
-            className="hidden"
-            onChange={handleFileUpload}
-          />
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            disabled={uploading}
-            className="flex items-center gap-1.5 text-xs bg-emerald-600 text-white px-3 py-2 rounded-lg font-medium hover:bg-emerald-700 transition-colors disabled:opacity-50"
-          >
-            <Upload size={14} />
-            {uploading ? "Processing..." : "Import CSV"}
-          </button>
-          <button 
-            onClick={handleExport}
-            disabled={data.length === 0}
-            className="flex items-center gap-1.5 text-xs bg-[#1B3A8C] text-white px-3 py-2 rounded-lg font-medium hover:bg-[#152D6E] transition-colors disabled:opacity-50">
-            <Download size={14} />
-            Export Unique
-          </button>
+        <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2 bg-slate-100 p-1 rounded-lg">
+            <button
+              onClick={() => setActiveTab('dashboard')}
+              className={`px-4 py-2 rounded-md text-xs font-semibold transition-all ${activeTab === 'dashboard' ? 'bg-white shadow text-[#1B3A8C]' : 'text-muted-foreground hover:text-foreground'}`}
+            >
+              Dashboard
+            </button>
+            <button
+              onClick={() => setActiveTab('certificates')}
+              className={`px-4 py-2 rounded-md text-xs font-semibold transition-all ${activeTab === 'certificates' ? 'bg-white shadow text-[#1B3A8C]' : 'text-muted-foreground hover:text-foreground'}`}
+            >
+              Certificates
+            </button>
+          </div>
+          
+          <div className="flex items-center gap-2">
+            <input
+              type="file"
+              ref={fileInputRef}
+              accept=".csv"
+              className="hidden"
+              onChange={handleFileUpload}
+            />
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              disabled={uploading}
+              className="flex items-center gap-1.5 text-xs bg-emerald-600 text-white px-3 py-2 rounded-lg font-medium hover:bg-emerald-700 transition-colors disabled:opacity-50"
+            >
+              <Upload size={14} />
+              {uploading ? "Processing..." : "Import CSV"}
+            </button>
+            <button 
+              onClick={handleExport}
+              disabled={data.length === 0}
+              className="flex items-center gap-1.5 text-xs bg-[#1B3A8C] text-white px-3 py-2 rounded-lg font-medium hover:bg-[#152D6E] transition-colors disabled:opacity-50"
+            >
+              <Download size={14} />
+              Export Unique
+            </button>
+          </div>
         </div>
       </header>
 
       {/* Content */}
       <main className="p-5 lg:p-6">
-        <SectionHeader
-          title="Executive Dashboard"
-          subtitle={data.length > 0 ? `${data.length} records processed from uploaded CSV` : "Ready for data import"}
-        />
-        <DashboardView 
-          data={data} 
-          activeSector={activeSector} 
-          onSectorClick={setActiveSector}
-        />
+        {activeTab === 'dashboard' ? (
+          <>
+            <SectionHeader
+              title="Executive Dashboard"
+              subtitle={data.length > 0 ? `${data.length} records processed from uploaded CSV` : "Ready for data import"}
+            />
+            <DashboardView 
+              data={data} 
+              activeSector={activeSector} 
+              onSectorClick={setActiveSector}
+            />
+          </>
+        ) : (
+          <CertificateCreator data={data} />
+        )}
       </main>
     </div>
   );
