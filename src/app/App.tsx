@@ -1041,14 +1041,89 @@ function CertificateCreator({ data }: { data: Participant[] }) {
     setDraggingFieldId(null);
   };
 
+  // Helper to generate QR code as image URL
+  const generateQRCodeDataUrl = (text: string): Promise<string> => {
+    return new Promise((resolve) => {
+      const canvas = document.createElement('canvas');
+      const div = document.createElement('div');
+      div.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><rect x="0" y="0" width="100" height="100" fill="#ffffff"/><rect x="10" y="10" width="80" height="80" fill="#000000"/></svg>`;
+      const svg = div.firstChild as SVGSVGElement;
+      const svgData = new XMLSerializer().serializeToString(svg);
+      const img = new Image();
+      img.onload = () => {
+        const ctx = canvas.getContext('2d');
+        canvas.width = 100;
+        canvas.height = 100;
+        ctx?.drawImage(img, 0, 0);
+        resolve(canvas.toDataURL('image/png'));
+      };
+      img.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svgData)));
+    });
+  };
+
+  // Download preview (first certificate)
+  const downloadPreview = async () => {
+    if (!previewRef.current || uniqueData.length === 0) {
+      alert('Please upload a template and add participants first!');
+      return;
+    }
+    
+    const participant = uniqueData[0];
+    const certId = eventIdCounter.current;
+    
+    const tempDiv = document.createElement('div');
+    tempDiv.innerHTML = previewRef.current.innerHTML;
+    tempDiv.style.position = 'absolute';
+    tempDiv.style.left = '-9999px';
+    tempDiv.style.top = '0';
+    tempDiv.style.width = '800px';
+    tempDiv.style.background = 'white';
+    document.body.appendChild(tempDiv);
+
+    // Update fields with first participant data
+    const fields = tempDiv.querySelectorAll('[style*="absolute"]');
+    config.fields.forEach((field, idx) => {
+      if (fields[idx]) {
+        if (field.type === 'text') {
+          let value = field.label;
+          if (field.fieldType === 'fullname') {
+            value = participant.name || `${participant.firstName || ''} ${participant.lastName || ''}`;
+          } else if (field.fieldType === 'activityTitle') {
+            value = config.activityTitle;
+          } else if (field.fieldType === 'activityDate') {
+            value = config.activityDate;
+          }
+          (fields[idx] as HTMLElement).innerText = value;
+        }
+      }
+    });
+
+    const canvas = await html2canvas(tempDiv, {
+      scale: 2,
+      useCORS: true,
+      backgroundColor: '#ffffff',
+    });
+
+    const imgData = canvas.toDataURL('image/png');
+    const pdf = new jsPDF('landscape', 'mm', 'a4');
+    const imgWidth = 280;
+    const imgHeight = (canvas.height * imgWidth) / canvas.width;
+    pdf.addImage(imgData, 'PNG', 10, 10, imgWidth, imgHeight);
+    
+    pdf.save('Certificate_Preview.pdf');
+    document.body.removeChild(tempDiv);
+  };
+
   const generateCertificates = async () => {
-    if (!previewRef.current || uniqueData.length === 0) return;
+    if (!previewRef.current || uniqueData.length === 0) {
+      alert('Please upload a template and add participants first!');
+      return;
+    }
 
     for (let i = 0; i < uniqueData.length; i++) {
       const participant = uniqueData[i];
-      const certId = i + 1;
+      const certId = eventIdCounter.current + i;
       
-      // Create a temporary preview element for this participant
       const tempDiv = document.createElement('div');
       tempDiv.innerHTML = previewRef.current.innerHTML;
       tempDiv.style.position = 'absolute';
@@ -1058,47 +1133,29 @@ function CertificateCreator({ data }: { data: Participant[] }) {
       tempDiv.style.background = 'white';
       document.body.appendChild(tempDiv);
 
-      // Update fields with participant data
       const fields = tempDiv.querySelectorAll('[style*="absolute"]');
       config.fields.forEach((field, idx) => {
         if (fields[idx]) {
           if (field.type === 'text') {
             let value = field.label;
-            // Replace placeholders like {FullName}, {Email}, etc.
-            if (value.includes('{FullName}')) {
-              value = value.replace('{FullName}', participant.name || `${participant.firstName || ''} ${participant.lastName || ''}`);
-            }
-            if (value.includes('{ActivityTitle}')) {
-              value = value.replace('{ActivityTitle}', config.activityTitle);
-            }
-            if (value.includes('{ActivityDate}')) {
-              value = value.replace('{ActivityDate}', config.activityDate);
+            if (field.fieldType === 'fullname') {
+              value = participant.name || `${participant.firstName || ''} ${participant.lastName || ''}`;
+            } else if (field.fieldType === 'activityTitle') {
+              value = config.activityTitle;
+            } else if (field.fieldType === 'activityDate') {
+              value = config.activityDate;
             }
             (fields[idx] as HTMLElement).innerText = value;
-          } else if (field.type === 'qrcode') {
-            // Replace QR code content with certificate ID
-            const svg = fields[idx].querySelector('svg');
-            if (svg) {
-              svg.innerHTML = '';
-              const qrData = `Certificate ID: ${certId}\nName: ${participant.name || `${participant.firstName || ''} ${participant.lastName || ''}`}\nActivity: ${config.activityTitle}`;
-              const qrSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-              qrSvg.setAttribute('width', '100');
-              qrSvg.setAttribute('height', '100');
-              // We'll use a simple approach here - the user can use the UI to generate
-              // For now, let's just add the QR code SVG with the correct data
-            }
           }
         }
       });
 
-      // Generate canvas
       const canvas = await html2canvas(tempDiv, {
         scale: 2,
         useCORS: true,
         backgroundColor: '#ffffff',
       });
 
-      // Create PDF
       const imgData = canvas.toDataURL('image/png');
       const pdf = new jsPDF('landscape', 'mm', 'a4');
       const imgWidth = 280;
@@ -1108,9 +1165,10 @@ function CertificateCreator({ data }: { data: Participant[] }) {
       const name = (participant.name || `${participant.firstName || ''} ${participant.lastName || ''}`).replace(/\s+/g, '_');
       pdf.save(`Certificate_${name}_${certId}.pdf`);
 
-      // Clean up
       document.body.removeChild(tempDiv);
     }
+    
+    eventIdCounter.current += uniqueData.length;
   };
 
   return (
@@ -1429,17 +1487,25 @@ function CertificateCreator({ data }: { data: Participant[] }) {
               </div>
             </div>
             
-            {uniqueData.length > 0 && config.templateImage && (
+            {(config.templateImage || canvasDataUrl) && (
               <div className="mt-4 pt-4 border-t border-border">
                 <h3 className="text-sm font-semibold text-foreground mb-2">Generate Certificates</h3>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   <span className="text-xs text-muted-foreground">{uniqueData.length} unique participants ready</span>
                   <button 
-                    onClick={generateCertificates}
-                    className="flex items-center gap-2 text-xs bg-emerald-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-emerald-700 transition-colors"
+                    onClick={downloadPreview}
+                    className="flex items-center gap-2 text-xs bg-blue-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-blue-700 transition-colors"
                   >
                     <Download size={14} />
-                    Generate All Certificates
+                    Download Preview
+                  </button>
+                  <button 
+                    onClick={generateCertificates}
+                    disabled={uniqueData.length === 0}
+                    className="flex items-center gap-2 text-xs bg-emerald-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-emerald-700 transition-colors disabled:opacity-50"
+                  >
+                    <Download size={14} />
+                    Bulk Download All ({uniqueData.length})
                   </button>
                 </div>
               </div>
