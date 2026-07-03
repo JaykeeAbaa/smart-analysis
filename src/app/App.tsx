@@ -400,16 +400,6 @@ const processData = (rawData: any[], columnMap: { [key: string]: string }) => {
         if (!participant.duplicateReasons.includes(reason)) {
           participant.duplicateReasons.push(reason);
         }
-        // Also mark previous one as duplicate
-        seen[key].forEach(prevId => {
-          const prev = normalizedData.find(p => p.id === prevId);
-          if (prev) {
-            prev.isDuplicate = true;
-            if (!prev.duplicateReasons.includes(reason)) {
-              prev.duplicateReasons.push(reason);
-            }
-          }
-        });
       } else {
         seen[key] = [];
       }
