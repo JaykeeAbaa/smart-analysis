@@ -1041,88 +1041,21 @@ function CertificateCreator({ data }: { data: Participant[] }) {
     setDraggingFieldId(null);
   };
 
-  // Helper to generate QR code as image URL
-  const generateQRCodeDataUrl = (text: string): Promise<string> => {
-    return new Promise((resolve) => {
-      const canvas = document.createElement('canvas');
-      const div = document.createElement('div');
-      div.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><rect x="0" y="0" width="100" height="100" fill="#ffffff"/><rect x="10" y="10" width="80" height="80" fill="#000000"/></svg>`;
-      const svg = div.firstChild as SVGSVGElement;
-      const svgData = new XMLSerializer().serializeToString(svg);
-      const img = new Image();
-      img.onload = () => {
-        const ctx = canvas.getContext('2d');
-        canvas.width = 100;
-        canvas.height = 100;
-        ctx?.drawImage(img, 0, 0);
-        resolve(canvas.toDataURL('image/png'));
-      };
-      img.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svgData)));
-    });
-  };
-
   // Download preview (first certificate)
   const downloadPreview = async () => {
-    if (!previewRef.current || uniqueData.length === 0) {
-      alert('Please upload a template and add participants first!');
-      return;
-    }
-    
-    const participant = uniqueData[0];
-    const certId = eventIdCounter.current;
-    
-    const tempDiv = document.createElement('div');
-    tempDiv.innerHTML = previewRef.current.innerHTML;
-    tempDiv.style.position = 'absolute';
-    tempDiv.style.left = '-9999px';
-    tempDiv.style.top = '0';
-    tempDiv.style.width = '800px';
-    tempDiv.style.background = 'white';
-    document.body.appendChild(tempDiv);
-
-    // Update fields with first participant data
-    const fields = tempDiv.querySelectorAll('[style*="absolute"]');
-    config.fields.forEach((field, idx) => {
-      if (fields[idx]) {
-        if (field.type === 'text') {
-          let value = field.label;
-          if (field.fieldType === 'fullname') {
-            value = participant.name || `${participant.firstName || ''} ${participant.lastName || ''}`;
-          } else if (field.fieldType === 'activityTitle') {
-            value = config.activityTitle;
-          } else if (field.fieldType === 'activityDate') {
-            value = config.activityDate;
-          }
-          (fields[idx] as HTMLElement).innerText = value;
-        }
+    console.log('Download Preview clicked');
+    try {
+      if (!previewRef.current) {
+        alert('Please upload a certificate template first!');
+        return;
       }
-    });
-
-    const canvas = await html2canvas(tempDiv, {
-      scale: 2,
-      useCORS: true,
-      backgroundColor: '#ffffff',
-    });
-
-    const imgData = canvas.toDataURL('image/png');
-    const pdf = new jsPDF('landscape', 'mm', 'a4');
-    const imgWidth = 280;
-    const imgHeight = (canvas.height * imgWidth) / canvas.width;
-    pdf.addImage(imgData, 'PNG', 10, 10, imgWidth, imgHeight);
-    
-    pdf.save('Certificate_Preview.pdf');
-    document.body.removeChild(tempDiv);
-  };
-
-  const generateCertificates = async () => {
-    if (!previewRef.current || uniqueData.length === 0) {
-      alert('Please upload a template and add participants first!');
-      return;
-    }
-
-    for (let i = 0; i < uniqueData.length; i++) {
-      const participant = uniqueData[i];
-      const certId = eventIdCounter.current + i;
+      if (uniqueData.length === 0) {
+        alert('Please upload a CSV with participants first!');
+        return;
+      }
+      
+      const participant = uniqueData[0];
+      const certId = eventIdCounter.current;
       
       const tempDiv = document.createElement('div');
       tempDiv.innerHTML = previewRef.current.innerHTML;
@@ -1136,6 +1069,7 @@ function CertificateCreator({ data }: { data: Participant[] }) {
       const fields = tempDiv.querySelectorAll('[style*="absolute"]');
       config.fields.forEach((field, idx) => {
         if (fields[idx]) {
+          const fieldEl = fields[idx] as HTMLElement;
           if (field.type === 'text') {
             let value = field.label;
             if (field.fieldType === 'fullname') {
@@ -1145,30 +1079,100 @@ function CertificateCreator({ data }: { data: Participant[] }) {
             } else if (field.fieldType === 'activityDate') {
               value = config.activityDate;
             }
-            (fields[idx] as HTMLElement).innerText = value;
+            fieldEl.innerText = value;
           }
         }
       });
 
+      console.log('Generating canvas...');
       const canvas = await html2canvas(tempDiv, {
         scale: 2,
         useCORS: true,
         backgroundColor: '#ffffff',
+        logging: true,
       });
 
+      console.log('Creating PDF...');
       const imgData = canvas.toDataURL('image/png');
       const pdf = new jsPDF('landscape', 'mm', 'a4');
       const imgWidth = 280;
       const imgHeight = (canvas.height * imgWidth) / canvas.width;
       pdf.addImage(imgData, 'PNG', 10, 10, imgWidth, imgHeight);
       
-      const name = (participant.name || `${participant.firstName || ''} ${participant.lastName || ''}`).replace(/\s+/g, '_');
-      pdf.save(`Certificate_${name}_${certId}.pdf`);
-
+      pdf.save('Certificate_Preview.pdf');
       document.body.removeChild(tempDiv);
+    } catch (error) {
+      console.error('Error generating preview:', error);
+      alert('Error generating preview: ' + (error as Error).message);
     }
-    
-    eventIdCounter.current += uniqueData.length;
+  };
+
+  const generateCertificates = async () => {
+    console.log('Bulk Download clicked');
+    try {
+      if (!previewRef.current) {
+        alert('Please upload a certificate template first!');
+        return;
+      }
+      if (uniqueData.length === 0) {
+        alert('Please upload a CSV with participants first!');
+        return;
+      }
+
+      for (let i = 0; i < uniqueData.length; i++) {
+        const participant = uniqueData[i];
+        const certId = eventIdCounter.current + i;
+        
+        const tempDiv = document.createElement('div');
+        tempDiv.innerHTML = previewRef.current.innerHTML;
+        tempDiv.style.position = 'absolute';
+        tempDiv.style.left = '-9999px';
+        tempDiv.style.top = '0';
+        tempDiv.style.width = '800px';
+        tempDiv.style.background = 'white';
+        document.body.appendChild(tempDiv);
+
+        const fields = tempDiv.querySelectorAll('[style*="absolute"]');
+        config.fields.forEach((field, idx) => {
+          if (fields[idx]) {
+            const fieldEl = fields[idx] as HTMLElement;
+            if (field.type === 'text') {
+              let value = field.label;
+              if (field.fieldType === 'fullname') {
+                value = participant.name || `${participant.firstName || ''} ${participant.lastName || ''}`;
+              } else if (field.fieldType === 'activityTitle') {
+                value = config.activityTitle;
+              } else if (field.fieldType === 'activityDate') {
+                value = config.activityDate;
+              }
+              fieldEl.innerText = value;
+            }
+          }
+        });
+
+        const canvas = await html2canvas(tempDiv, {
+          scale: 2,
+          useCORS: true,
+          backgroundColor: '#ffffff',
+        });
+
+        const imgData = canvas.toDataURL('image/png');
+        const pdf = new jsPDF('landscape', 'mm', 'a4');
+        const imgWidth = 280;
+        const imgHeight = (canvas.height * imgWidth) / canvas.width;
+        pdf.addImage(imgData, 'PNG', 10, 10, imgWidth, imgHeight);
+        
+        const name = (participant.name || `${participant.firstName || ''} ${participant.lastName || ''}`).replace(/\s+/g, '_');
+        pdf.save(`Certificate_${name}_${certId}.pdf`);
+
+        document.body.removeChild(tempDiv);
+      }
+      
+      eventIdCounter.current += uniqueData.length;
+    } catch (error) {
+      console.error('Error generating certificates:', error);
+      alert('Error generating certificates: ' + (error as Error).message);
+    }
   };
 
   return (
