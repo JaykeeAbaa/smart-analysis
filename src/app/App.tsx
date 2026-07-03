@@ -12,7 +12,7 @@ import {
 
 const CHART_COLORS = ["#1B3A8C", "#0EA5E9", "#E8900A", "#10B981", "#8B5CF6", "#EC4899", "#F59E0B", "#06B6D4", "#84CC16", "#94A3B8"];
 
-function Badge({ children, variant = "default" }: { children: React.ReactNode; variant?: "default" | "success" | "warning" | "danger" | "info" | "purple" }) {
+function Badge({ children, variant = "default", className = "" }: { children: React.ReactNode; variant?: "default" | "success" | "warning" | "danger" | "info" | "purple"; className?: string }) {
   const styles = {
     default: "bg-slate-100 text-slate-700",
     success: "bg-emerald-100 text-emerald-700",
@@ -22,7 +22,7 @@ function Badge({ children, variant = "default" }: { children: React.ReactNode; v
     purple: "bg-purple-100 text-purple-700",
   };
   return (
-    <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold ${styles[variant]}`}>
+    <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold whitespace-nowrap ${styles[variant]} ${className}`}>
       {children}
     </span>
   );
@@ -521,42 +521,45 @@ function DataTable({ data, activeSector }: DataTableProps) {
 
       {/* Table */}
       <div className="overflow-x-auto rounded-lg border border-border">
-        <table className="w-full text-xs">
+        <table className="w-full text-xs table-fixed">
           <thead className="bg-slate-50 border-b border-border">
             <tr>
-              <th className="text-left py-3 px-4 text-muted-foreground font-semibold whitespace-nowrap">#</th>
+              <th className="text-left py-2 px-3 text-muted-foreground font-semibold whitespace-nowrap w-10">#</th>
               {visibleColumns.map((col) => (
-                <th key={col} className="text-left py-3 px-4 text-muted-foreground font-semibold whitespace-nowrap capitalize">
+                <th key={col} className="text-left py-2 px-3 text-muted-foreground font-semibold whitespace-nowrap overflow-hidden text-ellipsis">
                   {col}
                 </th>
               ))}
-              <th className="text-left py-3 px-4 text-muted-foreground font-semibold whitespace-nowrap">Status</th>
-              <th className="text-left py-3 px-4 text-muted-foreground font-semibold whitespace-nowrap">Duplicate Reason</th>
+              <th className="text-left py-2 px-3 text-muted-foreground font-semibold whitespace-nowrap w-20">Status</th>
+              <th className="text-left py-2 px-3 text-muted-foreground font-semibold whitespace-nowrap w-32">Duplicate Reason</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
             {paginatedData.length > 0 ? (
               paginatedData.map((item, index) => (
                 <tr key={item.id} className="hover:bg-slate-50">
-                  <td className="py-3 px-4 text-muted-foreground font-mono">{startIndex + index + 1}</td>
+                  <td className="py-2 px-3 text-muted-foreground font-mono">{startIndex + index + 1}</td>
                   {visibleColumns.map((col) => (
-                    <td key={col} className="py-3 px-4 text-muted-foreground whitespace-nowrap">
+                    <td key={col} className="py-2 px-3 text-muted-foreground overflow-hidden text-ellipsis whitespace-nowrap">
                       {item[col]}
                     </td>
                   ))}
-                  <td className="py-3 px-4">
-                    <Badge variant={item.isDuplicate ? "warning" : "success"}>
+                  <td className="py-2 px-3">
+                    <Badge variant={item.isDuplicate ? "warning" : "success"} className="text-[10px] px-2 py-0.5">
                       {item.isDuplicate ? "Duplicate" : "Unique"}
                     </Badge>
                   </td>
-                  <td className="py-3 px-4">
+                  <td className="py-2 px-3">
                     {item.duplicateReasons.length > 0 ? (
-                      <div className="flex flex-wrap gap-1">
-                        {item.duplicateReasons.map((reason) => (
-                          <Badge key={reason} variant="info">
+                      <div className="flex flex-nowrap gap-0.5 overflow-hidden">
+                        {item.duplicateReasons.slice(0, 1).map((reason) => (
+                          <Badge key={reason} variant="info" className="flex-shrink-0 text-[10px] px-2 py-0.5">
                             {reason}
                           </Badge>
                         ))}
+                        {item.duplicateReasons.length > 1 && (
+                          <span className="text-muted-foreground flex-shrink-0 text-[10px]">+{item.duplicateReasons.length - 1}</span>
+                        )}
                       </div>
                     ) : (
                       "-"
