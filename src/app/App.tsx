@@ -833,6 +833,22 @@ interface CertificateField {
   label: string;
   fontSize: number;
   color: string;
+  fontFamily: string;
+  textAlign: "left" | "center" | "right";
+  fieldType?: "fullname" | "custom" | "activityTitle" | "activityDate";
+}
+
+interface VerificationField {
+  id: string;
+  type: "text";
+  x: number;
+  y: number;
+  label: string;
+  fieldType: "eventId" | "issuedBy" | "date" | "resourceSpeaker" | "digitallySignedBy" | "custom";
+  fontSize: number;
+  color: string;
+  fontFamily: string;
+  textAlign: "left" | "center" | "right";
 }
 
 interface CertificateConfig {
@@ -841,6 +857,12 @@ interface CertificateConfig {
   fields: CertificateField[];
   activityTitle: string;
   activityDate: string;
+  verificationTemplateImage: string | null;
+  verificationTemplatePdf: ArrayBuffer | null;
+  verificationFields: VerificationField[];
+  issuedBy: string;
+  resourceSpeaker: string;
+  digitallySignedBy: string;
 }
 
 function CertificateCreator({ data }: { data: Participant[] }) {
@@ -850,13 +872,25 @@ function CertificateCreator({ data }: { data: Participant[] }) {
     fields: [],
     activityTitle: "",
     activityDate: "",
+    verificationTemplateImage: null,
+    verificationTemplatePdf: null,
+    verificationFields: [],
+    issuedBy: "",
+    resourceSpeaker: "",
+    digitallySignedBy: "",
   });
   const [canvasDataUrl, setCanvasDataUrl] = useState<string | null>(null);
   const [selectedFieldId, setSelectedFieldId] = useState<string | null>(null);
   const [draggingFieldId, setDraggingFieldId] = useState<string | null>(null);
   const [dragOffset, setDragOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [showVerificationModal, setShowVerificationModal] = useState(false);
+  const [verificationCanvasDataUrl, setVerificationCanvasDataUrl] = useState<string | null>(null);
+  const [selectedVerificationFieldId, setSelectedVerificationFieldId] = useState<string | null>(null);
+  const [draggingVerificationFieldId, setDraggingVerificationFieldId] = useState<string | null>(null);
+  const [verificationDragOffset, setVerificationDragOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const previewRef = useRef<HTMLDivElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const verificationPreviewRef = useRef<HTMLDivElement>(null);
+  const eventIdCounter = useRef(1);
 
   const uniqueData = useMemo(() => data.filter(item => !item.isDuplicate), [data]);
 
@@ -918,6 +952,9 @@ function CertificateCreator({ data }: { data: Participant[] }) {
       label: "Full Name",
       fontSize: 24,
       color: "#000000",
+      fontFamily: "Arial",
+      textAlign: "left",
+      fieldType: "fullname",
     };
     setConfig(prev => ({ ...prev, fields: [...prev.fields, newField] }));
     setSelectedFieldId(newField.id);
@@ -932,9 +969,36 @@ function CertificateCreator({ data }: { data: Participant[] }) {
       label: "QR Code",
       fontSize: 16,
       color: "#000000",
+      fontFamily: "Arial",
+      textAlign: "left",
     };
     setConfig(prev => ({ ...prev, fields: [...prev.fields, newField] }));
     setSelectedFieldId(newField.id);
+  };
+
+  const addVerificationField = (fieldType: VerificationField["fieldType"]) => {
+    const labels: Record<string, string> = {
+      eventId: "Event ID",
+      issuedBy: "Issued By",
+      date: "Date",
+      resourceSpeaker: "Resource Speaker",
+      digitallySignedBy: "Digitally Signed By",
+      custom: "Custom Field",
+    };
+    const newField: VerificationField = {
+      id: Date.now().toString(),
+      type: "text",
+      x: 50,
+      y: 50,
+      label: labels[fieldType],
+      fieldType,
+      fontSize: 14,
+      color: "#000000",
+      fontFamily: "Arial",
+      textAlign: "left",
+    };
+    setConfig(prev => ({ ...prev, verificationFields: [...prev.verificationFields, newField] }));
+    setSelectedVerificationFieldId(newField.id);
   };
 
   const removeField = (id: string) => {
@@ -1104,6 +1168,55 @@ function CertificateCreator({ data }: { data: Participant[] }) {
                   >
                     Add QR Code
                   </button>
+                  <button 
+                    onClick={() => setShowVerificationModal(true)}
+                    className="w-full flex items-center justify-center gap-2 text-xs bg-orange-500 text-white px-3 py-2 rounded-lg font-medium hover:bg-orange-600 transition-colors"
+                  >
+                    Verification Statement Setup
+                  </button>
+                </div>
+              </div>
+              
+              <div className="pt-2 border-t border-border">
+                <h3 className="text-xs font-semibold text-foreground mb-2">Verification Settings</h3>
+                <div className="space-y-2">
+                  <div>
+                    <label className="block text-xs text-muted-foreground mb-1">Event ID Start</label>
+                    <input 
+                      type="number" 
+                      value={eventIdCounter.current}
+                      onChange={(e) => { eventIdCounter.current = parseInt(e.target.value) || 1; }}
+                      className="w-full text-xs border border-border rounded px-2 py-1 bg-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-muted-foreground mb-1">Issued By</label>
+                    <input 
+                      type="text" 
+                      value={config.issuedBy}
+                      onChange={(e) => setConfig(prev => ({ ...prev, issuedBy: e.target.value }))}
+                      className="w-full text-xs border border-border rounded px-2 py-1 bg-white"
+                      placeholder="e.g., DICT Caraga"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-muted-foreground mb-1">Resource Speaker</label>
+                    <input 
+                      type="text" 
+                      value={config.resourceSpeaker}
+                      onChange={(e) => setConfig(prev => ({ ...prev, resourceSpeaker: e.target.value }))}
+                      className="w-full text-xs border border-border rounded px-2 py-1 bg-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-muted-foreground mb-1">Digitally Signed By</label>
+                    <input 
+                      type="text" 
+                      value={config.digitallySignedBy}
+                      onChange={(e) => setConfig(prev => ({ ...prev, digitallySignedBy: e.target.value }))}
+                      className="w-full text-xs border border-border rounded px-2 py-1 bg-white"
+                    />
+                  </div>
                 </div>
               </div>
               
@@ -1143,6 +1256,41 @@ function CertificateCreator({ data }: { data: Participant[] }) {
                                   />
                                 </div>
                                 <div>
+                                  <label className="block text-xs text-muted-foreground mb-1">Field Type</label>
+                                  <select 
+                                    value={field.fieldType || "custom"}
+                                    onChange={(e) => setConfig(prev => ({
+                                      ...prev,
+                                      fields: prev.fields.map(f => f.id === field.id ? { ...f, fieldType: e.target.value as any } : f)
+                                    }))}
+                                    className="w-full text-xs border border-border rounded px-2 py-1 bg-white"
+                                  >
+                                    <option value="fullname">Full Name</option>
+                                    <option value="activityTitle">Activity Title</option>
+                                    <option value="activityDate">Activity Date</option>
+                                    <option value="custom">Custom</option>
+                                  </select>
+                                </div>
+                                <div>
+                                  <label className="block text-xs text-muted-foreground mb-1">Font Family</label>
+                                  <select 
+                                    value={field.fontFamily}
+                                    onChange={(e) => setConfig(prev => ({
+                                      ...prev,
+                                      fields: prev.fields.map(f => f.id === field.id ? { ...f, fontFamily: e.target.value } : f)
+                                    }))}
+                                    className="w-full text-xs border border-border rounded px-2 py-1 bg-white"
+                                  >
+                                    <option value="Arial">Arial</option>
+                                    <option value="Times New Roman">Times New Roman</option>
+                                    <option value="Courier New">Courier New</option>
+                                    <option value="Verdana">Verdana</option>
+                                    <option value="Georgia">Georgia</option>
+                                    <option value="Comic Sans MS">Comic Sans MS</option>
+                                    <option value="Tahoma">Tahoma</option>
+                                  </select>
+                                </div>
+                                <div>
                                   <label className="block text-xs text-muted-foreground mb-1">Font Size: {field.fontSize}px</label>
                                   <input 
                                     type="range" 
@@ -1155,6 +1303,21 @@ function CertificateCreator({ data }: { data: Participant[] }) {
                                     }))}
                                     className="w-full"
                                   />
+                                </div>
+                                <div>
+                                  <label className="block text-xs text-muted-foreground mb-1">Text Alignment</label>
+                                  <select 
+                                    value={field.textAlign}
+                                    onChange={(e) => setConfig(prev => ({
+                                      ...prev,
+                                      fields: prev.fields.map(f => f.id === field.id ? { ...f, textAlign: e.target.value as any } : f)
+                                    }))}
+                                    className="w-full text-xs border border-border rounded px-2 py-1 bg-white"
+                                  >
+                                    <option value="left">Left</option>
+                                    <option value="center">Center</option>
+                                    <option value="right">Right</option>
+                                  </select>
                                 </div>
                                 <div>
                                   <label className="block text-xs text-muted-foreground mb-1">Color</label>
@@ -1284,6 +1447,277 @@ function CertificateCreator({ data }: { data: Participant[] }) {
           </ChartCard>
         </div>
       </div>
+
+      {/* Verification Statement Modal */}
+      {showVerificationModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg w-[95%] max-w-7xl max-h-[95vh] overflow-auto">
+            <div className="flex items-center justify-between p-4 border-b">
+              <h2 className="text-lg font-semibold">Verification Statement Setup</h2>
+              <button 
+                onClick={() => setShowVerificationModal(false)}
+                className="text-gray-500 hover:text-gray-700 text-2xl"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="p-4">
+              <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+                {/* Verification Controls */}
+                <div className="lg:col-span-1 space-y-4">
+                  <ChartCard title="Template & Fields">
+                    <div className="space-y-3">
+                      <div>
+                        <label className="block text-xs font-medium text-foreground mb-1">Upload Verification Template</label>
+                        <input 
+                          type="file" 
+                          accept="image/*,application/pdf" 
+                          onChange={async (e) => {
+                            const file = e.target.files?.[0];
+                            if (!file) return;
+                            if (file.type === 'application/pdf') {
+                              const arrayBuffer = await file.arrayBuffer();
+                              setConfig(prev => ({ ...prev, verificationTemplatePdf: arrayBuffer, verificationTemplateImage: null }));
+                              try {
+                                const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
+                                const pdf = await loadingTask.promise;
+                                const page = await pdf.getPage(1);
+                                const scale = 2;
+                                const viewport = page.getViewport({ scale });
+                                const canvas = document.createElement('canvas');
+                                const context = canvas.getContext('2d');
+                                if (!context) return;
+                                canvas.height = viewport.height;
+                                canvas.width = viewport.width;
+                                const renderTask = page.render({ canvasContext: context, viewport });
+                                await renderTask.promise;
+                                const dataUrl = canvas.toDataURL('image/png');
+                                setVerificationCanvasDataUrl(dataUrl);
+                              } catch (err) {
+                                console.error('Error rendering PDF:', err);
+                              }
+                            } else {
+                              const reader = new FileReader();
+                              reader.onload = (event) => {
+                                setVerificationCanvasDataUrl(event.target?.result as string);
+                                setConfig(prev => ({ ...prev, verificationTemplateImage: event.target?.result as string, verificationTemplatePdf: null }));
+                              };
+                              reader.readAsDataURL(file);
+                            }
+                          }}
+                          className="text-xs"
+                        />
+                      </div>
+
+                      <div className="pt-2 border-t border-border">
+                        <h3 className="text-xs font-semibold text-foreground mb-2">Add Fields</h3>
+                        <div className="space-y-2">
+                          <button 
+                            onClick={() => addVerificationField('eventId')}
+                            className="w-full flex items-center justify-center gap-2 text-xs bg-purple-600 text-white px-3 py-2 rounded-lg font-medium hover:bg-purple-700 transition-colors"
+                          >
+                            Event ID Code
+                          </button>
+                          <button 
+                            onClick={() => addVerificationField('issuedBy')}
+                            className="w-full flex items-center justify-center gap-2 text-xs bg-blue-600 text-white px-3 py-2 rounded-lg font-medium hover:bg-blue-700 transition-colors"
+                          >
+                            Issued By
+                          </button>
+                          <button 
+                            onClick={() => addVerificationField('date')}
+                            className="w-full flex items-center justify-center gap-2 text-xs bg-green-600 text-white px-3 py-2 rounded-lg font-medium hover:bg-green-700 transition-colors"
+                          >
+                            Date
+                          </button>
+                          <button 
+                            onClick={() => addVerificationField('resourceSpeaker')}
+                            className="w-full flex items-center justify-center gap-2 text-xs bg-yellow-600 text-white px-3 py-2 rounded-lg font-medium hover:bg-yellow-700 transition-colors"
+                          >
+                            Resource Speaker
+                          </button>
+                          <button 
+                            onClick={() => addVerificationField('digitallySignedBy')}
+                            className="w-full flex items-center justify-center gap-2 text-xs bg-red-600 text-white px-3 py-2 rounded-lg font-medium hover:bg-red-700 transition-colors"
+                          >
+                            Digitally Signed By
+                          </button>
+                        </div>
+                      </div>
+
+                      {config.verificationFields.length > 0 && (
+                        <div className="pt-2 border-t border-border">
+                          <h3 className="text-xs font-semibold text-foreground mb-2">Fields</h3>
+                          <div className="space-y-2">
+                            {config.verificationFields.map(field => (
+                              <div 
+                                key={field.id} 
+                                className={`p-2 rounded-lg border cursor-pointer transition-colors ${selectedVerificationFieldId === field.id ? 'border-blue-500 bg-blue-50' : 'border-border bg-white hover:bg-slate-50'}`}
+                                onClick={() => setSelectedVerificationFieldId(field.id)}
+                              >
+                                <div className="flex items-center justify-between mb-1">
+                                  <span className="text-xs font-medium">{field.label}</span>
+                                  <button 
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setConfig(prev => ({ ...prev, verificationFields: prev.verificationFields.filter(f => f.id !== field.id) }));
+                                      if (selectedVerificationFieldId === field.id) setSelectedVerificationFieldId(null);
+                                    }}
+                                    className="text-red-500 hover:text-red-700"
+                                  >
+                                    ×
+                                  </button>
+                                </div>
+                                {selectedVerificationFieldId === field.id && (
+                                  <div className="space-y-2 mt-2">
+                                    <div>
+                                      <label className="block text-xs text-muted-foreground mb-1">Font Size: {field.fontSize}px</label>
+                                      <input 
+                                        type="range" 
+                                        min="8" 
+                                        max="32" 
+                                        value={field.fontSize}
+                                        onChange={(e) => setConfig(prev => ({
+                                          ...prev,
+                                          verificationFields: prev.verificationFields.map(f => f.id === field.id ? { ...f, fontSize: parseInt(e.target.value) } : f)
+                                        }))}
+                                        className="w-full"
+                                      />
+                                    </div>
+                                    <div>
+                                      <label className="block text-xs text-muted-foreground mb-1">X: {field.x}px</label>
+                                      <input 
+                                        type="range" 
+                                        min="0" 
+                                        max="800" 
+                                        value={field.x}
+                                        onChange={(e) => setConfig(prev => ({
+                                          ...prev,
+                                          verificationFields: prev.verificationFields.map(f => f.id === field.id ? { ...f, x: parseInt(e.target.value) } : f)
+                                        }))}
+                                        className="w-full"
+                                      />
+                                    </div>
+                                    <div>
+                                      <label className="block text-xs text-muted-foreground mb-1">Y: {field.y}px</label>
+                                      <input 
+                                        type="range" 
+                                        min="0" 
+                                        max="600" 
+                                        value={field.y}
+                                        onChange={(e) => setConfig(prev => ({
+                                          ...prev,
+                                          verificationFields: prev.verificationFields.map(f => f.id === field.id ? { ...f, y: parseInt(e.target.value) } : f)
+                                        }))}
+                                        className="w-full"
+                                      />
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </ChartCard>
+
+                  <div className="flex justify-end gap-2">
+                    <button 
+                      onClick={() => setShowVerificationModal(false)}
+                      className="px-4 py-2 text-xs border border-border rounded-lg hover:bg-slate-50"
+                    >
+                      Cancel
+                    </button>
+                    <button 
+                      onClick={() => setShowVerificationModal(false)}
+                      className="px-4 py-2 text-xs bg-emerald-600 text-white rounded-lg hover:bg-emerald-700"
+                    >
+                      Save & Close
+                    </button>
+                  </div>
+                </div>
+
+                {/* Verification Preview */}
+                <div className="lg:col-span-3">
+                  <ChartCard title="Verification Statement Preview">
+                    <div className="overflow-auto">
+                      <div 
+                        ref={verificationPreviewRef}
+                        id="verification-preview" 
+                        className="relative bg-white border border-border rounded-lg overflow-hidden mx-auto select-none"
+                        style={{ width: 800, minHeight: 600 }}
+                        onMouseMove={(e) => {
+                          if (!draggingVerificationFieldId || !verificationPreviewRef.current) return;
+                          const rect = verificationPreviewRef.current.getBoundingClientRect();
+                          const newX = e.clientX - rect.left - verificationDragOffset.x;
+                          const newY = e.clientY - rect.top - verificationDragOffset.y;
+                          setConfig(prev => ({
+                            ...prev,
+                            verificationFields: prev.verificationFields.map(f => 
+                              f.id === draggingVerificationFieldId 
+                                ? { ...f, x: Math.max(0, Math.min(700, newX)), y: Math.max(0, Math.min(500, newY)) }
+                                : f
+                            ),
+                          }));
+                        }}
+                        onMouseUp={() => setDraggingVerificationFieldId(null)}
+                        onMouseLeave={() => setDraggingVerificationFieldId(null)}
+                      >
+                        {config.verificationTemplateImage ? (
+                          <img src={config.verificationTemplateImage} alt="Verification Template" className="w-full h-auto pointer-events-none" draggable={false} />
+                        ) : verificationCanvasDataUrl ? (
+                          <img src={verificationCanvasDataUrl} alt="Verification Template" className="w-full h-auto pointer-events-none" draggable={false} />
+                        ) : (
+                          <div className="flex items-center justify-center h-[600px] text-muted-foreground text-sm">
+                            Upload a verification statement template (PDF or image) to get started
+                          </div>
+                        )}
+
+                        {config.verificationFields.map(field => (
+                          <div
+                            key={field.id}
+                            className={`absolute transition-all ${selectedVerificationFieldId === field.id ? 'ring-2 ring-blue-500' : ''} ${draggingVerificationFieldId === field.id ? 'cursor-grabbing' : 'cursor-grab'}`}
+                            style={{ 
+                              left: field.x, 
+                              top: field.y,
+                              zIndex: draggingVerificationFieldId === field.id ? 100 : 10,
+                            }}
+                            onMouseDown={(e) => {
+                              e.stopPropagation();
+                              setSelectedVerificationFieldId(field.id);
+                              setDraggingVerificationFieldId(field.id);
+                              if (verificationPreviewRef.current) {
+                                const rect = verificationPreviewRef.current.getBoundingClientRect();
+                                setVerificationDragOffset({
+                                  x: e.clientX - rect.left - field.x,
+                                  y: e.clientY - rect.top - field.y,
+                                });
+                              }
+                            }}
+                          >
+                            <div 
+                              style={{ 
+                                fontSize: field.fontSize, 
+                                color: field.color,
+                                fontWeight: 'bold',
+                                whiteSpace: 'nowrap',
+                              }}
+                            >
+                              {field.label}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </ChartCard>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
